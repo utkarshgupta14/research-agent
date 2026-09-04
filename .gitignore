@@ -47,3 +47,8 @@ data/index/*
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Future Tasks / TODO
+TODO.md
+
+
