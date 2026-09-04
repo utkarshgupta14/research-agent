@@ -1,0 +1,558 @@
+ResearchPilot
+MVP 0 — Implementation Plan
+Agentic research assistant over a curated research-paper corpus
+
+Purpose: Build a small, useful, presentable proof of concept while establishing the architectural boundaries needed for later iterations.
+
+1. Project Vision
+ResearchPilot is intended to evolve into a research-intelligence system that helps a researcher investigate technical questions across a corpus of research papers. The long-term system will go beyond ordinary RAG: it will decompose complex questions, retrieve evidence iteratively, understand papers structurally, compare methods, detect contradictions and research gaps, and eventually help formulate research hypotheses and experiments.
+MVP 0 deliberately does not attempt all of that. Its purpose is to prove the central product idea: a user can ask a non-trivial technical research question and receive a useful, evidence-grounded research brief based on a curated corpus of papers.
+Long-term progression  MVP 0 Basic agentic RAG     ↓ Better retrieval     ↓ Agentic research workflow     ↓ Structured research knowledge     ↓ Cross-paper intelligence     ↓ Research-gap / hypothesis discovery 
+The implementation should therefore be small in scope but not disposable. Boundaries that are cheap to establish now and likely to matter later are established in MVP 0: a Retriever abstraction, separate paper-level and evidence-level retrieval tools, structured paper/chunk models, and LangGraph-based orchestration.
+2. MVP 0 — What We Are Building
+MVP 0 is a local research assistant for a narrow, curated collection of technical papers. The user enters a research question. A LangGraph agent can discover relevant papers, retrieve specific evidence from those papers, inspect paper metadata, and synthesize a cited research brief.
+2.1 Example interaction
+User: "What are the major approaches to domain generalization in face anti-spoofing, and what are the main limitations of each?"  Agent: 1. Search for relevant papers. 2. Select candidate papers. 3. Retrieve evidence about approaches and limitations. 4. Inspect paper metadata where useful. 5. Synthesize the evidence. 6. Produce a concise research brief with source references. 
+2.2 What counts as success
+A user can ingest a curated corpus of roughly 30–50 papers.
+The system preserves basic paper structure and metadata such as title, authors, year, abstract, section, and page.
+Paper-level retrieval can find relevant papers for a research question.
+Evidence-level retrieval can find relevant passages within selected papers.
+A LangGraph agent can decide which retrieval tool to call and can call tools more than once when necessary.
+The final answer is grounded in retrieved evidence and uses only source identifiers supplied to the model.
+The UI exposes the final research brief and a simple research/tool trace.
+The system can be demonstrated on several realistic ML research questions.
+The implementation is organized so later phases can replace FAISS with Qdrant, add hybrid retrieval/reranking, and add richer research reasoning without rewriting the application.
+3. MVP 0 Scope and Non-Goals
+In scope
+Out of scope for MVP 0
+Curated local PDF corpus
+Web-scale literature search
+PyMuPDF-based parsing
+Advanced PDF/layout/table understanding
+Basic section-aware structure
+LLM-based semantic paper extraction
+Paper-level FAISS index
+BM25 / sparse retrieval
+Chunk-level FAISS index
+Reranking / cross-encoder
+Retriever abstraction
+Qdrant / hosted vector database
+Three research tools
+Multi-agent architecture
+LangGraph agent loop
+Sophisticated planner/critic/verifier graph
+Citation-aware synthesis
+Formal citation correctness evaluator
+Simple evaluation set
+Large automated benchmark
+Streamlit UI at the end
+React / production frontend
+Local execution
+Cloud deployment / auth / multi-user backend
+
+4. Functional Requirements
+ID
+Requirement
+Description
+FR-1
+Corpus ingestion
+The system shall ingest PDF papers from a local directory.
+FR-2
+Paper metadata
+Each paper shall have a stable ID and basic metadata: title, authors, year, abstract, source path.
+FR-3
+Paper structure
+The system shall retain basic section/page information where it can be extracted reliably.
+FR-4
+Chunking
+Paper text shall be divided into searchable chunks while retaining paper, page, and section metadata.
+FR-5
+Paper search
+The system shall support paper-level semantic search.
+FR-6
+Evidence retrieval
+The system shall support evidence-level semantic retrieval, optionally restricted to selected papers.
+FR-7
+Paper inspection
+The agent shall be able to retrieve metadata/basic structure for a selected paper.
+FR-8
+Agent orchestration
+A LangGraph agent shall choose among research tools and loop back to the agent after tool execution.
+FR-9
+Grounded generation
+The agent shall synthesize an answer from supplied evidence and shall not invent source IDs.
+FR-10
+Citations
+The final answer shall map source IDs to paper/page/section information.
+FR-11
+Trace
+The application shall expose high-level tool activity, not private chain-of-thought.
+FR-12
+Evaluation
+A small question set shall be used to manually/automatically inspect retrieval and answer quality.
+
+5. Non-Functional Requirements
+Keep local setup simple: Python environment + local files + FAISS; no Docker or external vector database for MVP 0.
+Use clear module boundaries so individual components can be improved independently.
+Keep ingestion deterministic and repeatable.
+Use environment variables for secrets and never commit API keys.
+Prefer typed data models for paper, chunk, evidence, citation, and research-result objects.
+Keep agent state explicit and small.
+Avoid putting retrieval/database logic inside LangGraph nodes or prompts.
+Every implementation step should leave the project in a runnable state.
+Do not build speculative abstractions that do not support a known future requirement.
+6. Overall MVP 0 Design
+                              USER                                 │                                 ▼                        ┌────────────────┐                        │  Streamlit UI  │                        └───────┬────────┘                                │                                ▼                      ┌───────────────────┐                      │ Research Service  │                      └─────────┬─────────┘                                │                                ▼                     ┌─────────────────────┐                     │    LangGraph        │                     │   Research Agent    │                     └──────────┬──────────┘                                │                     ┌──────────┼──────────┐                     │          │          │                     ▼          ▼          ▼              search_papers  retrieve_   get_paper                             evidence                     │          │          │                     └──────────┼──────────┘                                ▼                          Retriever API                                │                     ┌──────────┴──────────┐                     ▼                     ▼               Paper Index            Chunk Index                  FAISS                  FAISS                     │                     │                     └──────────┬──────────┘                                ▼                      Structured Corpus                      + paper/chunk JSON 
+6.1 Technology choices
+Component
+MVP 0 choice
+Why
+Language
+Python 3.11
+Fits existing ML experience and ecosystem.
+Agent orchestration
+LangGraph
+Stateful graph is useful immediately and avoids a later rewrite.
+Vector search
+FAISS
+Minimal setup and enough for a small local corpus.
+Embeddings
+One strong embedding model/API
+Avoid premature model benchmarking.
+PDF parsing
+PyMuPDF
+Simple, fast, and sufficient for initial text extraction.
+Data models
+Pydantic/dataclasses
+Explicit contracts between ingestion, retrieval, and agent layers.
+Frontend
+Streamlit
+Fast to make presentable; build it last.
+Backend/API
+None initially
+Avoid FastAPI and HTTP complexity until a real need exists.
+Containerization
+None
+No service infrastructure is needed with FAISS.
+Tracing
+Simple application logging
+Enough for MVP; add LangSmith later if agent complexity warrants it.
+
+7. Architecture Details
+7.1 Data flow
+PDF  ↓ PDF parser  ↓ Document structure  ├── metadata  ├── sections  └── pages  ↓ Chunker  ↓ Chunk objects  ↓ Embedding  ├───────────────┐  ▼               ▼ Paper index     Chunk index FAISS           FAISS 
+7.2 Paper-level vs evidence-level retrieval
+These are intentionally separate operations even though both are implemented with FAISS in MVP 0.
+Tool
+Question answered
+Input
+Output
+search_papers()
+Which papers are relevant?
+Research query
+Ranked paper summaries/IDs
+retrieve_evidence()
+What passages support the question?
+Query + optional paper IDs
+Ranked evidence chunks
+get_paper()
+What is this paper?
+Paper ID
+Metadata, abstract, sections
+
+7.3 Retriever abstraction
+The rest of the application should depend on a small Retriever contract rather than on FAISS directly. MVP 0 only needs one implementation, FAISSRetriever. A future QdrantRetriever can implement the same contract.
+Retriever ├── index_papers(...) ├── index_chunks(...) ├── search_papers(query, k) └── retrieve_evidence(query, paper_ids=None, k=...)  MVP 0 implementation: Retriever └── FAISSRetriever 
+7.4 Basic structured paper model
+Paper ├── paper_id ├── title ├── authors ├── year ├── abstract ├── source_path └── sections[]  Section ├── title ├── page_start └── page_end  Chunk ├── chunk_id ├── paper_id ├── section ├── page └── text 
+Do not use an LLM to infer methods, datasets, results, or limitations in MVP 0. The initial structure is document structure and metadata, not semantic research understanding.
+8. Project Structure
+research-pilot/ │ ├── app/ │   ├── agent/ │   │   ├── __init__.py │   │   ├── graph.py │   │   ├── state.py │   │   ├── nodes.py │   │   ├── tools.py │   │   └── prompts.py │   │ │   ├── retrieval/ │   │   ├── __init__.py │   │   ├── base.py │   │   ├── faiss_retriever.py │   │   └── embeddings.py │   │ │   ├── ingestion/ │   │   ├── __init__.py │   │   ├── parser.py │   │   ├── structure.py │   │   ├── chunker.py │   │   └── pipeline.py │   │ │   ├── models/ │   │   ├── __init__.py │   │   ├── paper.py │   │   ├── chunk.py │   │   └── research.py │   │ │   ├── services/ │   │   ├── __init__.py │   │   └── research_service.py │   │ │   └── config.py │ ├── frontend/ │   └── app.py │ ├── scripts/ │   ├── ingest.py │   └── query.py │ ├── data/ │   ├── papers/ │   ├── documents/ │   └── index/ │       ├── paper_index.faiss │       ├── chunk_index.faiss │       ├── papers.json │       └── chunks.json │ ├── evaluation/ │   ├── questions.json │   └── evaluate.py │ ├── tests/ │   ├── test_ingestion.py │   ├── test_retrieval.py │   └── test_agent.py │ ├── .env ├── .env.example ├── .gitignore ├── pyproject.toml └── README.md 
+9. Implementation Methodology with Antigravity
+The project should be implemented in small, verifiable increments. Do not give Antigravity the entire project specification as one coding task. Give it one milestone at a time, inspect the result, run the verification, and only then proceed.
+Antigravity's current IDE workflow supports implementation plans and concrete task lists, and its official guidance recommends review-driven development. Use that capability: ask for a plan when a step is architectural, review it, then let the agent implement the small task. Keep terminal permissions conservative enough that you can review dependency installation and destructive operations.
+For every prompt below, paste it into the Antigravity Agent panel. If Antigravity proposes changes outside the step's scope, reject or revise them rather than allowing scope creep.
+10. Granular Implementation Plan
+Step 0.1 — Create the repository and development environment
+Get a clean Python project with version control and a minimal dependency setup. Do not create application logic yet.
+Implementation actions
+Create/open the research-pilot project in Antigravity.
+Initialize Git if not already initialized.
+Create a Python 3.11 environment (Conda is fine).
+Create pyproject.toml with the initial dependency set.
+Create .gitignore and .env.example.
+Create the directory skeleton from Section 8, but leave implementation files minimal.
+Run a simple Python import/version check.
+Definition of done / verification
+The environment activates successfully, Python runs, the package manager can install dependencies, and Git sees the expected files.
+Antigravity prompt — Step 0.1 — Create the repository and development environment
+We are starting the ResearchPilot MVP 0 project.  Read the MVP 0 implementation plan in the project if it is present. For this task ONLY: 1. Create the project directory structure described in Section 8. 2. Set up a clean Python 3.11 project using pyproject.toml. 3. Add only the dependencies required for the current MVP foundation: LangGraph/LangChain, FAISS, PyMuPDF, Pydantic, python-dotenv, Streamlit, and the selected LLM/embedding provider packages. 4. Create .gitignore and .env.example. 5. Do not implement ingestion, retrieval, agents, or UI logic yet. 6. Run a basic environment/import verification. 7. Report exactly what you created and any dependency/version issues.  Do not add Docker, FastAPI, Qdrant, LangSmith, BM25, reranking, or other infrastructure.
+Step 0.2 — Define the core data models
+Create stable data contracts before implementing the pipeline.
+Implementation actions
+Implement Paper, Section, Chunk, Evidence, Citation, and ResearchResult models.
+Keep models focused on data, not behavior.
+Use stable IDs.
+Represent page and section metadata explicitly.
+Add minimal validation.
+Definition of done / verification
+A small test can construct and serialize each model.
+Antigravity prompt — Step 0.2 — Define the core data models
+Implement ONLY the core data models for ResearchPilot MVP 0.  Create: - app/models/paper.py: Paper and Section - app/models/chunk.py: Chunk and Evidence - app/models/research.py: Citation and ResearchResult  Requirements: - Use Pydantic or dataclasses consistently. - Keep models small and explicit. - Every Chunk must retain paper_id, chunk_id, page, section, and text. - Evidence should retain the chunk/source identity and retrieval score if available. - Citation must be able to map a source ID to paper title, page, and section. - ResearchResult should contain the final answer, citations/sources, and a high-level research trace. - Do not implement retrieval or agent logic. - Add a few unit tests for construction and serialization.  Do not add fields for future research gaps, hypotheses, contradictions, or semantic method extraction yet.
+Step 0.3 — Implement PDF parsing
+Turn a PDF into page-level text while preserving basic page metadata.
+Implementation actions
+Implement parser.py using PyMuPDF.
+Return a deterministic page-level representation.
+Handle empty pages gracefully.
+Record source path and page number.
+Do not chunk yet.
+Add a CLI or test using one sample paper.
+Definition of done / verification
+A sample paper produces page objects with text and correct page numbers.
+Antigravity prompt — Step 0.3 — Implement PDF parsing
+Implement ONLY the PDF parsing layer for ResearchPilot MVP 0.  Create app/ingestion/parser.py using PyMuPDF.  Input: - path to a PDF  Output: - a simple page-level representation that can later be converted into Sections and Chunks.  Requirements: - Preserve page number. - Preserve source path/document identity. - Extract text deterministically. - Handle pages with little/no text without crashing. - Do not implement embeddings, FAISS, chunking, or LLM calls. - Add tests using a small fixture if practical. - Add a small script or test command demonstrating that a real sample PDF can be parsed.  Keep the implementation simple and readable.
+Step 0.4 — Add basic section detection and document structure
+Preserve useful section information without attempting advanced semantic understanding.
+Implementation actions
+Implement structure.py.
+Detect obvious headings using simple heuristics where possible.
+Keep page boundaries.
+Associate page text with the current section.
+Use a fallback section such as 'Unknown' when detection is uncertain.
+Do not use an LLM for section detection.
+Definition of done / verification
+A sample paper produces a sensible list of sections and page ranges; failures fall back safely.
+Antigravity prompt — Step 0.4 — Add basic section detection and document structure
+Implement ONLY basic document structure extraction for ResearchPilot MVP 0.  Use the existing page-level parser output.  Create app/ingestion/structure.py that: - identifies obvious paper sections using lightweight deterministic heuristics, - associates pages/text with the current section, - records section title and page range, - uses a safe fallback such as 'Unknown' when a heading cannot be identified.  Do not use an LLM. Do not implement semantic extraction of methods, datasets, results, or limitations. Do not implement chunking or embeddings yet.  Inspect one or two real papers after implementation and report any limitations in heading detection.
+Step 0.5 — Implement chunking
+Create searchable chunks while preserving paper/page/section provenance.
+Implementation actions
+Implement chunker.py.
+Choose an initial chunk size around 500–800 tokens/rough equivalent and modest overlap.
+Never split away provenance metadata.
+Keep chunk IDs deterministic.
+Make chunking configurable.
+Add tests for size, overlap, and metadata preservation.
+Definition of done / verification
+The same document produces the same chunk IDs and every chunk can be traced to a paper/page/section.
+Antigravity prompt — Step 0.5 — Implement chunking
+Implement ONLY the chunking layer for ResearchPilot MVP 0.  Create app/ingestion/chunker.py.  Requirements: - Input: structured paper/pages/sections. - Output: Chunk objects. - Use a configurable initial chunk size and overlap. Start around 500–800 tokens worth of text with modest overlap. - Preserve paper_id, page, section, and source metadata on every chunk. - Generate deterministic chunk IDs. - Avoid producing empty chunks. - Keep the chunker independent of FAISS and the LLM. - Add unit tests for deterministic IDs, metadata preservation, and reasonable chunk boundaries.  Do not implement embeddings or retrieval yet.
+Step 0.6 — Implement the embedding provider
+Create one clean embedding component that converts paper summaries and chunks into vectors.
+Implementation actions
+Implement embeddings.py.
+Provide document and query embedding methods.
+Normalize vectors if required by the chosen similarity metric.
+Keep provider-specific code isolated.
+Read API credentials from environment variables if using an API model.
+Add a tiny smoke test.
+Definition of done / verification
+A sample text produces a vector of stable dimensionality and query/document embedding calls work.
+Antigravity prompt — Step 0.6 — Implement the embedding provider
+Implement ONLY the embedding component for ResearchPilot MVP 0.  Create app/retrieval/embeddings.py.  Requirements: - Isolate the chosen embedding provider behind a small class/interface. - Support embedding one query and batches of documents/chunks. - Read credentials/configuration from environment variables where required. - Keep provider-specific code out of the rest of the retrieval layer. - Add a small smoke test that embeds one query and a few texts. - Do not implement FAISS yet.  Do not add multiple embedding models or benchmarking infrastructure. Use one sensible model and make it replaceable later.
+Step 0.7 — Build the Retriever abstraction
+Establish the retrieval contract before implementing FAISS.
+Implementation actions
+Implement app/retrieval/base.py.
+Define paper indexing, chunk indexing, paper search, and evidence retrieval.
+Keep the interface small.
+Document expected inputs/outputs.
+Do not create a second backend.
+Definition of done / verification
+A minimal fake/mock implementation can satisfy the interface in tests.
+Antigravity prompt — Step 0.7 — Build the Retriever abstraction
+Implement ONLY the Retriever abstraction for ResearchPilot MVP 0.  Create app/retrieval/base.py.  Define a small interface/abstract base class for: - index_papers(...) - index_chunks(...) - search_papers(query, k) - retrieve_evidence(query, paper_ids=None, k)  Requirements: - The interface must return the project's Paper/Evidence models where appropriate. - No FAISS-specific types should leak into the interface. - Keep it small; do not create a large repository pattern or dependency-injection framework. - Add a minimal mock/fake implementation in tests to verify the contract.  Do not implement FAISS yet.
+Step 0.8 — Implement FAISSRetriever
+Create two local FAISS indexes: paper-level and chunk-level.
+Implementation actions
+Implement faiss_retriever.py.
+Create a paper index from title + abstract (and optionally a short metadata string).
+Create a chunk index from chunk text.
+Store metadata separately in JSON or structured local files.
+Implement search_papers().
+Implement retrieve_evidence().
+Allow evidence retrieval to be restricted to selected paper IDs.
+Implement save/load of both indexes.
+Definition of done / verification
+Given a small corpus, paper search returns relevant papers and evidence retrieval returns relevant chunks with correct provenance.
+Antigravity prompt — Step 0.8 — Implement FAISSRetriever
+Implement the FAISSRetriever for ResearchPilot MVP 0.  Create app/retrieval/faiss_retriever.py implementing the Retriever interface.  Architecture: - One FAISS index for paper-level search. - One FAISS index for chunk-level evidence search. - Store searchable metadata separately in JSON/local structured files. - Use the existing EmbeddingProvider. - Normalize vectors consistently if using cosine similarity via inner product. - search_papers(query, k) should search the paper index. - retrieve_evidence(query, paper_ids=None, k) should search the chunk index and optionally filter results to selected paper IDs. - Provide save/load functionality so ingestion does not need to run every time. - Do not add BM25, reranking, Qdrant, or hybrid retrieval. - Add tests using a tiny synthetic corpus. - Make sure the Retriever interface remains independent of FAISS.  After implementation, run the tests and perform a small real retrieval smoke test.
+Step 0.9 — Build the ingestion pipeline
+Connect parsing, structure, chunking, embeddings, and FAISS into one repeatable command.
+Implementation actions
+Implement ingestion/pipeline.py.
+Read PDFs from data/papers/.
+Generate Paper and Section structures.
+Generate chunks.
+Embed papers and chunks.
+Build/save the two FAISS indexes and metadata.
+Print a useful ingestion summary.
+Definition of done / verification
+One command can ingest a small corpus and produce the expected files under data/documents and data/index.
+Antigravity prompt — Step 0.9 — Build the ingestion pipeline
+Implement the end-to-end ingestion pipeline for ResearchPilot MVP 0.  Create app/ingestion/pipeline.py and scripts/ingest.py.  Pipeline: PDF files → parse pages → basic section structure → chunks → paper embeddings → chunk embeddings → FAISS paper index + chunk index → metadata JSON files  Requirements: - Process all PDFs under data/papers/. - Give each paper a stable deterministic paper_id. - Save document metadata under data/documents/. - Save indexes and retrieval metadata under data/index/. - Make ingestion repeatable. Running it twice should not create duplicate or inconsistent IDs. - Print counts: papers, pages, sections, chunks, indexed vectors. - Fail gracefully on a bad PDF and report the file. - Do not add a database. - Do not implement the agent or UI yet.  After implementation, ingest 3–5 sample papers and inspect the resulting metadata.
+Step 0.10 — Validate retrieval manually before adding the agent
+Prove that the retrieval foundation is useful independently of the LLM agent.
+Implementation actions
+Choose 5–10 realistic research questions.
+Run search_papers() manually.
+Run retrieve_evidence() manually.
+Inspect top results.
+Fix obvious chunking/metadata/retrieval problems before proceeding.
+Definition of done / verification
+Most questions return at least a few clearly relevant papers/chunks.
+Antigravity prompt — Step 0.10 — Validate retrieval manually before adding the agent
+Do not add new features yet. Act as a retrieval QA engineer.  Use the existing ResearchPilot MVP 0 corpus and retrieval code. 1. Create 5–10 realistic technical research questions for the current paper domain. 2. Run search_papers() and retrieve_evidence() for them. 3. Inspect whether the returned papers/chunks are actually relevant. 4. Identify obvious problems in parsing, chunking, embedding, indexing, metadata, or filtering. 5. Fix only clear retrieval bugs or data-quality issues. 6. Do not add BM25, reranking, agent changes, UI, or new infrastructure.  At the end, report: - what worked, - what did not, - what you changed, - remaining retrieval limitations.
+Step 0.11 — Define the LangGraph state
+Create the minimal but future-compatible agent state.
+Implementation actions
+Implement agent/state.py.
+Include question, messages, candidate papers, evidence, selected sources, answer, and high-level trace.
+Use typed state.
+Do not include future fields unless necessary.
+Definition of done / verification
+A test can create/update the state without ambiguity.
+Antigravity prompt — Step 0.11 — Define the LangGraph state
+Implement ONLY the LangGraph state for ResearchPilot MVP 0.  Create app/agent/state.py.  State should include: - question - messages - candidate_papers - evidence - selected_sources - answer - high-level research_trace  Use a typed, readable state representation compatible with LangGraph.  Do not implement graph nodes or tools yet. Do not add future research-gap/hypothesis fields unless there is a concrete reason.
+Step 0.12 — Implement the three research tools
+Expose paper discovery, evidence retrieval, and paper inspection to the agent.
+Implementation actions
+Implement search_papers().
+Implement retrieve_evidence().
+Implement get_paper().
+Return compact, model-friendly outputs.
+Keep source IDs and provenance explicit.
+Do not let tools return huge amounts of text.
+Definition of done / verification
+Each tool works independently from a small Python test/CLI.
+Antigravity prompt — Step 0.12 — Implement the three research tools
+Implement ONLY the three ResearchPilot MVP 0 tools in app/agent/tools.py.  Tools: 1. search_papers(query)    - Finds relevant papers.    - Returns paper IDs, titles, authors/year, abstracts or short summaries, and relevance scores.  2. retrieve_evidence(query, paper_ids=None)    - Finds evidence chunks.    - Can optionally restrict retrieval to selected paper IDs.    - Returns source IDs, paper IDs, page, section, text, and score.  3. get_paper(paper_id)    - Returns paper metadata, abstract, and basic section information.  Requirements: - Tools must call the Retriever abstraction, not FAISS directly. - Keep outputs compact enough for an LLM context. - Every evidence item must have a stable source ID. - Do not expose internal FAISS objects. - Add tests for all three tools. - Do not implement the LangGraph graph yet.
+Step 0.13 — Implement the LangGraph agent loop
+Create the actual agentic behavior using LangGraph.
+Implementation actions
+Implement graph.py and nodes.py.
+Use an LLM node and tool execution node.
+Allow the agent to call any of the three tools.
+Route tool calls back to the agent.
+End when the model produces a final answer.
+Keep the graph simple; no planner/critic subgraphs.
+Definition of done / verification
+A CLI question can cause the agent to call tools and produce an answer.
+Antigravity prompt — Step 0.13 — Implement the LangGraph agent loop
+Implement the LangGraph ResearchPilot MVP 0 agent.  Use the existing ResearchState and three tools: - search_papers - retrieve_evidence - get_paper  Graph shape: START → agent → tool execution → agent → ... → END  Requirements: - Use LangGraph's current tool-calling pattern. - The agent may call tools multiple times. - The agent should not be forced into a fixed retrieval sequence. - Record high-level tool events in research_trace. - Do not record or expose chain-of-thought. - End when the model produces a final response without a tool call. - Keep the graph simple. Do not add planner, critic, verifier, reflection, or multi-agent nodes yet. - Use structured model/tool interfaces where practical. - Add a test or smoke script that runs a real research question against the ingested corpus.  Do not build the UI yet.
+Step 0.14 — Add citation-grounded synthesis
+Make the agent's answer useful and demonstrably grounded.
+Implementation actions
+Define a source format such as [S1], [S2].
+Pass only retrieved evidence into the synthesis context.
+Require citations for substantive claims.
+Reject or flag source IDs not present in retrieved evidence.
+Map source IDs to paper/page/section metadata in ResearchResult.
+Definition of done / verification
+A generated answer cites only supplied sources and each citation can be opened to inspect the supporting evidence.
+Antigravity prompt — Step 0.14 — Add citation-grounded synthesis
+Improve ONLY the answer grounding and citation layer.  Requirements: - Retrieved evidence should be formatted with stable source IDs such as [S1], [S2]. - The model must be instructed to cite substantive claims using only supplied source IDs. - Never allow the model to invent source IDs. - After generation, parse cited source IDs and verify they exist in the retrieved evidence. - Convert source IDs into Citation objects containing paper title, page, and section. - If a citation is invalid, flag it rather than silently inventing metadata. - Preserve the original evidence text for later UI inspection. - Do not add a separate LLM verifier agent yet.  Add tests for valid and invalid citations.
+Step 0.15 — Add a simple CLI research interface
+Make the system usable end-to-end before building the frontend.
+Implementation actions
+Implement scripts/query.py.
+Accept a research question from the command line.
+Run the ResearchService/graph.
+Print a concise trace.
+Print the final answer.
+Print references and optionally evidence.
+Definition of done / verification
+A single command can run a real research question from start to finish.
+Antigravity prompt — Step 0.15 — Add a simple CLI research interface
+Create a minimal CLI for ResearchPilot MVP 0.  Create scripts/query.py.  Behavior: - Accept a research question as a command-line argument or interactive input. - Run the existing ResearchService/LangGraph agent. - Print a short high-level research trace such as:   Searching papers   Retrieved evidence   Inspecting paper   Synthesizing - Print the final cited research brief. - Print a references section mapping citations to paper/page/section. - Add an optional verbose mode that prints the retrieved evidence. - Do not change the retrieval or agent architecture. - Do not build Streamlit yet.
+Step 0.16 — Create a small evaluation set
+Establish a baseline before polishing the UI.
+Implementation actions
+Create evaluation/questions.json with 10–20 research questions.
+Include questions of different difficulty.
+Manually label expected relevant papers or topics where practical.
+Implement evaluate.py to run retrieval and report simple metrics or a review table.
+Do not build a sophisticated automated judge yet.
+Definition of done / verification
+The evaluation script can run and produce a readable summary.
+Antigravity prompt — Step 0.16 — Create a small evaluation set
+Create a small evaluation harness for ResearchPilot MVP 0.  Files: - evaluation/questions.json - evaluation/evaluate.py  Create 10–20 realistic research questions for the current corpus. For each question, where practical, include expected relevant paper IDs or expected topics.  Evaluate: - whether relevant papers appear in top-k, - whether retrieved evidence is relevant, - whether the final answer contains citations, - whether cited sources exist.  Keep the evaluation simple and inspectable. Do not introduce Ragas, LLM-as-judge, or a large benchmark yet.  Output a readable summary and save raw results if useful.
+Step 0.17 — Add basic automated tests and error handling
+Make the MVP stable enough to demonstrate.
+Implementation actions
+Test ingestion, retrieval, tools, agent state, and citation mapping.
+Handle missing index files.
+Handle empty retrieval results.
+Handle malformed PDFs.
+Handle missing environment variables.
+Ensure errors are surfaced clearly.
+Definition of done / verification
+The test suite passes and common failure modes produce understandable errors.
+Antigravity prompt — Step 0.17 — Add basic automated tests and error handling
+Harden ResearchPilot MVP 0 without adding new features.  Review the current code and add/fix tests for: - PDF parsing failure - empty/low-text documents - chunking edge cases - missing FAISS indexes - empty retrieval results - unknown paper IDs - missing LLM/embedding configuration - invalid citation IDs - agent/tool failures  Do not refactor unrelated code. Run the complete test suite and fix failures. At the end, report remaining known limitations.
+Step 0.18 — Build the Streamlit frontend LAST
+Create a simple but presentable research interface after the core system is proven.
+Implementation actions
+Create frontend/app.py.
+Provide a research-question input.
+Provide a Research button.
+Show high-level progress/tool trace.
+Show final research brief.
+Make citations clickable/expandable to show supporting evidence.
+Keep styling simple and professional.
+Do not put business logic in the UI.
+Definition of done / verification
+A user can launch Streamlit, enter a research question, watch high-level progress, and inspect the cited result/evidence.
+Antigravity prompt — Step 0.18 — Build the Streamlit frontend LAST
+Now build the Streamlit frontend for ResearchPilot MVP 0.  Important: the backend/agent/retrieval logic is already implemented. Do not move logic into the UI.  UI requirements: 1. Clean title: ResearchPilot. 2. Short description explaining that it answers technical research questions using the curated paper corpus. 3. Large research-question input. 4. Research button. 5. High-level progress/trace showing tool activity, but never chain-of-thought. 6. Final answer displayed as a structured research brief. 7. Citations displayed clearly. 8. Each citation should allow the user to inspect the supporting evidence and paper/page/section metadata. 9. Show useful error messages. 10. Keep the UI minimal; do not add authentication, dashboards, animations, or complex navigation.  Use the existing ResearchService/agent interface. Do not duplicate retrieval or agent logic in Streamlit.  After implementation, run the app and test at least three realistic questions.
+Step 0.19 — Final MVP 0 demo and cleanup
+Turn the working system into a coherent proof of concept.
+Implementation actions
+Select 3–5 strong demo questions.
+Run the system end-to-end.
+Fix only issues that materially affect correctness or presentation.
+Write a concise README with setup, ingestion, run, architecture, limitations, and demo questions.
+Capture final metrics such as corpus size and average response time if useful.
+Commit the completed MVP 0.
+Definition of done / verification
+A new developer can follow the README, ingest the corpus, start the app, and reproduce the demo.
+Antigravity prompt — Step 0.19 — Final MVP 0 demo and cleanup
+Prepare ResearchPilot MVP 0 for a proof-of-concept demonstration.  Do NOT add new architecture or advanced features.  1. Run the full test suite. 2. Ingest the final small paper corpus. 3. Run 3–5 representative research questions. 4. Fix only bugs or presentation issues that materially affect the demo. 5. Update README.md with:    - project purpose    - MVP 0 scope    - architecture    - setup    - how to ingest papers    - how to run CLI    - how to run Streamlit    - example research questions    - known limitations    - future roadmap 6. Report corpus size, chunk count, and any simple retrieval/answer observations. 7. Ensure no API keys or local secrets are committed.  Do not add Qdrant, BM25, reranking, GraphRAG, multi-agent features, or web search.
+11. Initial Dependency Set
+Keep the dependency set intentionally small. Exact provider packages depend on the LLM/embedding provider selected during implementation.
+Package/category
+Purpose
+MVP 0 status
+langgraph
+Agent graph/state/tool orchestration
+Required
+langchain-core / relevant LangChain packages
+Models, tools, message abstractions
+Required
+faiss-cpu
+Local vector similarity search
+Required
+PyMuPDF
+PDF text extraction
+Required
+pydantic
+Typed data contracts
+Required
+python-dotenv
+Environment configuration
+Required
+streamlit
+Final UI
+Required
+LLM provider SDK
+Agent/synthesis model
+Required
+Embedding provider SDK/model
+Document/query embeddings
+Required
+pytest
+Tests
+Required
+
+12. Expected Developer Workflow
+# Activate environment conda activate research-pilot  # Install/update dependencies pip install -e .  # Ingest papers python scripts/ingest.py  # Test retrieval/agent from CLI python scripts/query.py "What are the major approaches to ...?"  # Run tests pytest  # Run frontend (only after backend is working) streamlit run frontend/app.py 
+The exact package installation command may differ depending on the selected provider and operating system. Let Antigravity inspect the environment and resolve platform-specific dependency issues rather than blindly installing unrelated packages.
+13. Corpus Recommendation
+Use a narrow, coherent corpus rather than a large random collection. A good initial target is 30–50 papers in one research area that you understand well. Face anti-spoofing, speech anti-spoofing/deepfake detection, domain generalization, or multimodal learning are reasonable candidates. The goal is to ask questions that require cross-paper synthesis rather than simple lookup.
+Start with papers whose PDFs have selectable text.
+Prefer papers with clear sections and metadata.
+Keep a simple manifest mapping paper_id to filename/title.
+Do not mix unrelated domains in the first corpus.
+Use the same corpus throughout MVP 0 so retrieval changes are measurable.
+14. MVP 0 Agent Behavior
+The agent should behave like a cautious research assistant, not an autonomous researcher.
+Basic policy  1. Understand the user's question. 2. Search for relevant papers. 3. Select useful papers when necessary. 4. Retrieve specific evidence. 5. Inspect paper metadata when useful. 6. Synthesize only from retrieved evidence. 7. Cite substantive claims. 8. If evidence is insufficient, say so or search again. 9. Never fabricate citations. 10. Stop when the answer is adequately supported. 
+The policy is intentionally simple. Later versions can convert parts of it into explicit graph nodes, planning stages, evidence-quality checks, or iterative retrieval policies once there is evidence that those controls improve results.
+15. Final MVP 0 Frontend Requirements
+Area
+Required behavior
+Header
+ResearchPilot name + one-sentence purpose.
+Input
+Large text box for technical research question.
+Action
+Single Research button.
+Progress
+High-level tool activity only; no chain-of-thought.
+Answer
+Readable research brief with headings.
+Citations
+Source IDs mapped to paper/page/section.
+Evidence
+Expandable evidence for each citation.
+Errors
+Clear user-facing errors.
+Corpus info
+Optional small indicator of corpus size/version.
+
+16. Final MVP 0 Definition of Done
+The repository is clean and reproducible from the README.
+At least 30–50 coherent papers can be ingested.
+Each paper has stable metadata and basic section/page structure.
+Paper and chunk FAISS indexes can be generated and reloaded.
+search_papers(), retrieve_evidence(), and get_paper() work independently.
+LangGraph orchestrates the research agent and tools.
+The agent can make multiple tool calls when useful.
+The final answer contains only valid citations from retrieved evidence.
+The user can inspect citation evidence in the UI.
+A 10–20 question evaluation set exists.
+Core tests pass.
+The frontend is presentable enough for a project demonstration.
+No Qdrant, Docker, FastAPI, BM25, reranker, knowledge graph, multi-agent system, or web-scale search has been added merely for appearance.
+17. Explicit Boundary to MVP 1
+When MVP 0 is complete, stop. Do not immediately add every advanced RAG feature. First measure where the system fails. MVP 1 should be driven by those failures.
+MVP 0 failure analysis         │         ├── Wrong papers returned?         │       → retrieval/chunking/embedding investigation         │         ├── Relevant papers but wrong passages?         │       → chunking / evidence retrieval         │         ├── Good evidence but weak synthesis?         │       → prompt / context / model investigation         │         ├── Agent retrieves poorly?         │       → tool descriptions / routing / state         │         └── Correct answer but expensive/slow?                 → retrieval efficiency / model / context optimization  Only then choose MVP 1 work. 
+18. Antigravity Working Rules
+Use one conversation/task per small implementation step where practical.
+Give Antigravity the current step's prompt, not the entire future roadmap as an instruction to implement.
+Ask for an implementation plan when a step changes architecture; review it before execution.
+After implementation, explicitly ask Antigravity to run tests or a smoke test.
+Inspect important diffs yourself. Do not accept large unrelated refactors.
+If Antigravity proposes Qdrant, FastAPI, Docker, BM25, reranking, or other future infrastructure during MVP 0, reject the scope expansion unless it solves a concrete current problem.
+Keep the research trace limited to tool/action events; never display model chain-of-thought.
+Commit after each stable milestone so regressions are easy to isolate.
+When a step fails, fix the current step before moving forward.
+Use Antigravity's review-driven workflow and task artifacts to keep the implementation incremental.
+19. Suggested Git Commit Sequence
+Commit
+Milestone
+chore: initialize project
+Environment, pyproject, directories, gitignore
+feat: add core data models
+Paper/Section/Chunk/Evidence/ResearchResult
+feat: add pdf ingestion
+Parser + basic structure + chunker
+feat: add embedding and retriever abstraction
+Embedding provider + Retriever contract
+feat: add faiss retrieval
+Paper/chunk indexes + persistence
+feat: add corpus ingestion pipeline
+End-to-end indexing
+feat: add research tools
+Three agent tools
+feat: add langgraph research agent
+Agent graph + state
+feat: add grounded citations
+Source IDs + citation mapping
+feat: add cli research interface
+End-to-end CLI
+test: add evaluation set
+Questions + retrieval/answer checks
+feat: add streamlit ui
+Final presentation layer
+docs: finalize mvp0
+README + demo instructions
+
+20. What to Do First
+Do not ask Antigravity to build the entire MVP 0. Start with Step 0.1. Once it is complete and verified, move to Step 0.2, and continue sequentially. The first meaningful end-to-end milestone is Step 0.10: retrieval working well enough to inspect manually. The second is Step 0.13: the LangGraph agent can actually research a question. The frontend should wait until Step 0.18.
+The intended learning loop is: implement → inspect → run → understand → verify → commit → proceed. This keeps the project approachable as a beginner developer while still producing an architecture that can grow into the larger ResearchPilot system.
+21. Reference Notes
+The Antigravity-specific workflow in this plan is based on Google's current Antigravity IDE documentation and getting-started guidance, particularly its implementation-plan/task-list workflow, review-driven development guidance, agent panel, artifacts, and project/workspace model. The technical architecture for the application itself is deliberately independent of Antigravity.
+For LangGraph implementation details, use the current official LangGraph documentation when coding because APIs and package organization can change. Likewise, use the current documentation for the selected LLM and embedding provider.
