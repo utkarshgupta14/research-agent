@@ -64,7 +64,7 @@ class PDFParser:
         with pymupdf.open(str(path_obj)) as doc:
             for page_idx, page in enumerate(doc):
                 raw_text = page.get_text("text") or ""
-                cleaned_text = raw_text.strip()
+                cleaned_text = raw_text.strip() if isinstance(raw_text, str) else str(raw_text).strip()
                 pages.append(
                     ParsedPage(
                         page_number=page_idx + 1,

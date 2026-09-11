@@ -30,3 +30,6 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["."]
+
+[tool.pyrefly]
+conda-environment = "research-pilot"
