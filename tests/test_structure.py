@@ -173,3 +173,40 @@ def test_numbered_lists_and_long_lines_ignored():
 
     # Only actual section headings should be detected
     assert titles == ["1. Introduction", "2. Methodology"]
+
+
+def test_disjoint_text_when_sections_share_page():
+    """Verify that multiple sections sharing the same page have disjoint text without duplication."""
+    page_text = (
+        "1. Introduction\n"
+        "Introduction paragraph one.\n"
+        "2. Related Work\n"
+        "Related work paragraph.\n"
+        "3. Methodology\n"
+        "Methodology paragraph."
+    )
+    pages = [
+        ParsedPage(page_number=1, text=page_text, source_path="mock/paper.pdf", paper_id="p1")
+    ]
+
+    doc = extract_document_structure(pages)
+    assert len(doc.section_blocks) == 3
+
+    intro_b = doc.section_blocks[0]
+    related_b = doc.section_blocks[1]
+    method_b = doc.section_blocks[2]
+
+    assert intro_b.title == "1. Introduction"
+    assert "Introduction paragraph one." in intro_b.text
+    assert "Related work paragraph." not in intro_b.text
+    assert "Methodology paragraph." not in intro_b.text
+
+    assert related_b.title == "2. Related Work"
+    assert "Introduction paragraph one." not in related_b.text
+    assert "Related work paragraph." in related_b.text
+    assert "Methodology paragraph." not in related_b.text
+
+    assert method_b.title == "3. Methodology"
+    assert "Introduction paragraph one." not in method_b.text
+    assert "Related work paragraph." not in method_b.text
+    assert "Methodology paragraph." in method_b.text

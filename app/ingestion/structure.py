@@ -148,31 +148,45 @@ class DocumentStructureExtractor:
         paper_id = pages[0].paper_id
         source_path = pages[0].source_path
 
-        # Step 1: Detect heading locations across pages
-        # Each entry: (page_number, heading_title)
-        detected_headings: list[tuple[int, str]] = []
-
+        # Step 1: Collect non-empty lines with their corresponding page number
+        all_lines: list[tuple[int, str]] = []
         for page in pages:
             if page.is_empty:
                 continue
-
             for line in page.text.splitlines():
-                if _is_candidate_heading(line):
-                    title = _clean_heading_title(line)
-                    # Don't add identical consecutive heading on the same page
-                    if not detected_headings or detected_headings[-1] != (page.page_number, title):
-                        detected_headings.append((page.page_number, title))
+                stripped = line.strip()
+                if stripped:
+                    all_lines.append((page.page_number, stripped))
 
-        total_pages = max(p.page_number for p in pages)
+        all_page_nums = [p.page_number for p in pages]
+        min_page = min(all_page_nums)
+        max_page = max(all_page_nums)
 
-        # Fallback: if no headings are detected, create a single 'Unknown' section
-        if not detected_headings:
-            combined_text = "\n\n".join(p.text for p in pages if p.text.strip())
-            all_page_nums = [p.page_number for p in pages]
+        if not all_lines:
+            return StructuredDocument(
+                paper_id=paper_id,
+                source_path=source_path,
+                sections=[],
+                section_blocks=[],
+            )
+
+        # Step 2: Identify heading line positions in the sequential line stream
+        # Each entry: (line_index, page_number, heading_title)
+        heading_indices: list[tuple[int, int, str]] = []
+        for idx, (p_num, line) in enumerate(all_lines):
+            if _is_candidate_heading(line):
+                title = _clean_heading_title(line)
+                # Avoid consecutive duplicate heading lines
+                if not heading_indices or heading_indices[-1][2] != title:
+                    heading_indices.append((idx, p_num, title))
+
+        # Fallback: if no headings are detected across the paper, return single 'Unknown' section
+        if not heading_indices:
+            combined_text = "\n".join(line for _, line in all_lines)
             fallback_block = SectionBlock(
                 title="Unknown",
-                page_start=min(all_page_nums),
-                page_end=max(all_page_nums),
+                page_start=min_page,
+                page_end=max_page,
                 pages=all_page_nums,
                 text=combined_text,
             )
@@ -183,58 +197,54 @@ class DocumentStructureExtractor:
                 section_blocks=[fallback_block],
             )
 
-        # Step 2: Build section boundaries
-        # Check if the first detected heading starts after page 1 or after introductory content
-        first_heading_page = detected_headings[0][0]
-        section_ranges: list[tuple[str, int, int]] = []
-
-        # If the first heading starts after page 1, mark the preamble as 'Abstract' or 'Header'
-        if first_heading_page > 1:
-            section_ranges.append(("Header", 1, first_heading_page - 1))
-
-        # Build ranges for detected headings
-        for idx, (page_num, title) in enumerate(detected_headings):
-            if idx + 1 < len(detected_headings):
-                next_page_num = detected_headings[idx + 1][0]
-                # If next heading is on the same page, this section starts on page_num and ends on next_page_num
-                end_page = max(page_num, next_page_num)
-            else:
-                end_page = total_pages
-
-            section_ranges.append((title, page_num, end_page))
-
-        # Adjust overlaps: a section's page_end should be at least page_start
-        adjusted_ranges: list[tuple[str, int, int]] = []
-        for idx, (title, p_start, p_end) in enumerate(section_ranges):
-            if idx + 1 < len(section_ranges):
-                next_start = section_ranges[idx + 1][1]
-                p_end = max(p_start, next_start if next_start == p_start else next_start - 1)
-            else:
-                p_end = total_pages
-            adjusted_ranges.append((title, p_start, max(p_start, p_end)))
-
-        # Step 3: Associate pages and text with sections
+        # Step 3: Build disjoint section blocks using line slices
         blocks: list[SectionBlock] = []
-        page_map = {p.page_number: p for p in pages}
 
-        for title, p_start, p_end in adjusted_ranges:
-            sec_pages: list[int] = []
-            sec_texts: list[str] = []
+        first_h_idx, first_h_page, _ = heading_indices[0]
+        # If there is preamble before the first heading:
+        # - If first heading is after page 1, emit a 'Header' block for preceding pages
+        # - If first heading is on page 1, attach the preamble to that first section (e.g. Abstract)
+        if first_h_idx > 0 and first_h_page > 1:
+            preamble_lines = [line for _, line in all_lines[:first_h_idx]]
+            preamble_pages = sorted(set(p for p, _ in all_lines[:first_h_idx]))
+            blocks.append(
+                SectionBlock(
+                    title="Header",
+                    page_start=min(preamble_pages),
+                    page_end=max(preamble_pages),
+                    pages=preamble_pages,
+                    text="\n".join(preamble_lines),
+                )
+            )
 
-            for p_num in range(p_start, p_end + 1):
-                if p_num in page_map:
-                    sec_pages.append(p_num)
-                    page_text = page_map[p_num].text.strip()
-                    if page_text:
-                        sec_texts.append(page_text)
+        for i, (h_idx, h_page, title) in enumerate(heading_indices):
+            # Line slice for this section up to the next heading
+            if i + 1 < len(heading_indices):
+                next_h_idx = heading_indices[i + 1][0]
+                sec_line_tuples = all_lines[h_idx:next_h_idx]
+            else:
+                sec_line_tuples = all_lines[h_idx:]
+
+            sec_lines = [line for _, line in sec_line_tuples]
+            sec_pages = sorted(set(p for p, _ in sec_line_tuples))
+
+            # Prepend page 1 preamble (e.g. title/authors) to the first heading on page 1
+            if i == 0 and first_h_idx > 0 and first_h_page == 1:
+                preamble_lines = [line for _, line in all_lines[:first_h_idx]]
+                sec_lines = preamble_lines + sec_lines
+                sec_pages = sorted(set(sec_pages) | set(p for p, _ in all_lines[:first_h_idx]))
+
+            p_start = min(sec_pages) if sec_pages else h_page
+            # The last section extends to document end
+            p_end = max_page if i == len(heading_indices) - 1 else (max(sec_pages) if sec_pages else p_start)
 
             blocks.append(
                 SectionBlock(
                     title=title,
                     page_start=p_start,
-                    page_end=p_end,
+                    page_end=max(p_start, p_end),
                     pages=sec_pages,
-                    text="\n\n".join(sec_texts),
+                    text="\n".join(sec_lines),
                 )
             )
 
