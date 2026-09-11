@@ -42,6 +42,8 @@ data/documents/*
 !data/documents/.gitkeep
 data/index/*
 !data/index/.gitkeep
+data/papers/*
+!data/papers/.gitkeep
 
 # Pytest
 .pytest_cache/
