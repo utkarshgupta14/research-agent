@@ -104,8 +104,10 @@ class SectionBlock(BaseModel):
     title: str
     page_start: int
     page_end: int
+    line_start: int = 1
     pages: list[int] = Field(default_factory=list)
     text: str = ""
+    lines: list[tuple[int, str]] = Field(default_factory=list)
 
     def to_section(self) -> Section:
         """Convert this block to the core Section model."""
@@ -148,15 +150,16 @@ class DocumentStructureExtractor:
         paper_id = pages[0].paper_id
         source_path = pages[0].source_path
 
-        # Step 1: Collect non-empty lines with their corresponding page number
-        all_lines: list[tuple[int, str]] = []
+        # Step 1: Collect non-empty lines with their corresponding page and line number on that page
+        # Each item: (page_number, line_on_page, line_text)
+        all_lines: list[tuple[int, int, str]] = []
         for page in pages:
             if page.is_empty:
                 continue
-            for line in page.text.splitlines():
+            for line_idx, line in enumerate(page.text.splitlines(), start=1):
                 stripped = line.strip()
                 if stripped:
-                    all_lines.append((page.page_number, stripped))
+                    all_lines.append((page.page_number, line_idx, stripped))
 
         all_page_nums = [p.page_number for p in pages]
         min_page = min(all_page_nums)
@@ -171,24 +174,26 @@ class DocumentStructureExtractor:
             )
 
         # Step 2: Identify heading line positions in the sequential line stream
-        # Each entry: (line_index, page_number, heading_title)
-        heading_indices: list[tuple[int, int, str]] = []
-        for idx, (p_num, line) in enumerate(all_lines):
+        # Each entry: (all_lines_index, page_number, line_on_page, heading_title)
+        heading_indices: list[tuple[int, int, int, str]] = []
+        for idx, (p_num, line_on_page, line) in enumerate(all_lines):
             if _is_candidate_heading(line):
                 title = _clean_heading_title(line)
                 # Avoid consecutive duplicate heading lines
-                if not heading_indices or heading_indices[-1][2] != title:
-                    heading_indices.append((idx, p_num, title))
+                if not heading_indices or heading_indices[-1][3] != title:
+                    heading_indices.append((idx, p_num, line_on_page, title))
 
         # Fallback: if no headings are detected across the paper, return single 'Unknown' section
         if not heading_indices:
-            combined_text = "\n".join(line for _, line in all_lines)
+            combined_text = "\n".join(line for _, _, line in all_lines)
             fallback_block = SectionBlock(
                 title="Unknown",
                 page_start=min_page,
                 page_end=max_page,
+                line_start=1,
                 pages=all_page_nums,
                 text=combined_text,
+                lines=[(p, line) for p, _, line in all_lines],
             )
             return StructuredDocument(
                 paper_id=paper_id,
@@ -200,24 +205,26 @@ class DocumentStructureExtractor:
         # Step 3: Build disjoint section blocks using line slices
         blocks: list[SectionBlock] = []
 
-        first_h_idx, first_h_page, _ = heading_indices[0]
+        first_h_idx, first_h_page, _, _ = heading_indices[0]
         # If there is preamble before the first heading:
         # - If first heading is after page 1, emit a 'Header' block for preceding pages
         # - If first heading is on page 1, attach the preamble to that first section (e.g. Abstract)
         if first_h_idx > 0 and first_h_page > 1:
-            preamble_lines = [line for _, line in all_lines[:first_h_idx]]
-            preamble_pages = sorted(set(p for p, _ in all_lines[:first_h_idx]))
+            preamble_lines = [line for _, _, line in all_lines[:first_h_idx]]
+            preamble_pages = sorted(set(p for p, _, _ in all_lines[:first_h_idx]))
             blocks.append(
                 SectionBlock(
                     title="Header",
                     page_start=min(preamble_pages),
                     page_end=max(preamble_pages),
+                    line_start=1,
                     pages=preamble_pages,
                     text="\n".join(preamble_lines),
+                    lines=[(p, line) for p, _, line in all_lines[:first_h_idx]],
                 )
             )
 
-        for i, (h_idx, h_page, title) in enumerate(heading_indices):
+        for i, (h_idx, h_page, h_line, title) in enumerate(heading_indices):
             # Line slice for this section up to the next heading
             if i + 1 < len(heading_indices):
                 next_h_idx = heading_indices[i + 1][0]
@@ -225,14 +232,17 @@ class DocumentStructureExtractor:
             else:
                 sec_line_tuples = all_lines[h_idx:]
 
-            sec_lines = [line for _, line in sec_line_tuples]
-            sec_pages = sorted(set(p for p, _ in sec_line_tuples))
+            sec_lines = [line for _, _, line in sec_line_tuples]
+            sec_pages = sorted(set(p for p, _, _ in sec_line_tuples))
 
             # Prepend page 1 preamble (e.g. title/authors) to the first heading on page 1
             if i == 0 and first_h_idx > 0 and first_h_page == 1:
-                preamble_lines = [line for _, line in all_lines[:first_h_idx]]
+                preamble_lines = [line for _, _, line in all_lines[:first_h_idx]]
                 sec_lines = preamble_lines + sec_lines
-                sec_pages = sorted(set(sec_pages) | set(p for p, _ in all_lines[:first_h_idx]))
+                sec_pages = sorted(set(sec_pages) | set(p for p, _, _ in all_lines[:first_h_idx]))
+                sec_all_tuples = all_lines[:first_h_idx] + sec_line_tuples
+            else:
+                sec_all_tuples = sec_line_tuples
 
             p_start = min(sec_pages) if sec_pages else h_page
             # The last section extends to document end
@@ -243,8 +253,10 @@ class DocumentStructureExtractor:
                     title=title,
                     page_start=p_start,
                     page_end=max(p_start, p_end),
+                    line_start=h_line,
                     pages=sec_pages,
                     text="\n".join(sec_lines),
+                    lines=[(p, line) for p, _, line in sec_all_tuples],
                 )
             )
 

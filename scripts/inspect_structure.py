@@ -22,16 +22,17 @@ def inspect_paper(pdf_path: Path) -> None:
 
     print(f"Total Pages:      {total_pages}")
     print(f"Sections Detected: {len(doc_struct.sections)}")
-    print("-" * 70)
-    print(f"{'Section Title':<45} | {'Page Range':<12} | {'Pages'}")
-    print("-" * 70)
+    print("-" * 80)
+    print(f"{'Section Title':<40} | {'Start Location':<18} | {'Page Range':<12} | {'Pages'}")
+    print("-" * 80)
 
     for block in doc_struct.section_blocks:
+        start_loc_str = f"p. {block.page_start} (Ln {block.line_start})"
         page_range_str = f"pp. {block.page_start}–{block.page_end}"
         pages_list_str = ", ".join(str(p) for p in block.pages)
-        print(f"{block.title:<45} | {page_range_str:<12} | {pages_list_str}")
+        print(f"{block.title:<40} | {start_loc_str:<18} | {page_range_str:<12} | {pages_list_str}")
 
-    print("-" * 70)
+    print("-" * 80)
 
 
 def main() -> None:
