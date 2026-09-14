@@ -1,4 +1,4 @@
-from app.models import Chunk, Citation, Evidence, Paper, ResearchResult, Section
+from app.models import Chunk, Citation, Evidence, Paper, ScoredPaper, ResearchResult, Section
 
 
 def test_paper_and_section_construction_and_serialization():
@@ -21,6 +21,28 @@ def test_paper_and_section_construction_and_serialization():
     paper_reconstructed = Paper.model_validate_json(json_str)
 
     assert paper_reconstructed == paper
+
+
+def test_scored_paper_construction_and_serialization():
+    section = Section(title="Introduction", page_start=1, page_end=2)
+    scored = ScoredPaper(
+        paper_id="paper_001",
+        title="Domain Generalization in Face Anti-Spoofing",
+        authors=["Alice Smith"],
+        year=2023,
+        abstract="This paper explores...",
+        source_path="data/papers/paper_001.pdf",
+        sections=[section],
+        score=0.88,
+    )
+
+    assert isinstance(scored, Paper)
+    assert scored.score == 0.88
+    assert scored.title == "Domain Generalization in Face Anti-Spoofing"
+
+    json_str = scored.model_dump_json()
+    scored_reconstructed = ScoredPaper.model_validate_json(json_str)
+    assert scored_reconstructed == scored
 
 
 def test_chunk_and_evidence_construction_and_serialization():

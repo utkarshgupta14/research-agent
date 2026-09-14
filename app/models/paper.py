@@ -19,3 +19,9 @@ class Paper(BaseModel):
     abstract: str = ""
     source_path: str = ""
     sections: list[Section] = Field(default_factory=list)
+
+
+class ScoredPaper(Paper):
+    """Represents a paper retrieved in response to a query, with an attached relevance score."""
+
+    score: float | None = None
