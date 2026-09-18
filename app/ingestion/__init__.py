@@ -11,6 +11,7 @@ from app.ingestion.structure import (
     SectionBlock,
     StructuredDocument,
     extract_document_structure,
+    extract_paper,
     extract_sections,
 )
 
@@ -24,6 +25,7 @@ __all__ = [
     "TextChunker",
     "chunk_document",
     "extract_document_structure",
+    "extract_paper",
     "extract_sections",
     "parse_pdf",
 ]

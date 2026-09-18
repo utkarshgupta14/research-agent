@@ -5,8 +5,10 @@ from app.ingestion.parser import ParsedPage
 from app.ingestion.structure import (
     DocumentStructureExtractor,
     extract_document_structure,
+    extract_paper,
     extract_sections,
 )
+from app.models.paper import Paper
 
 
 @pytest.fixture
@@ -210,3 +212,97 @@ def test_disjoint_text_when_sections_share_page():
     assert "Introduction paragraph one." not in method_b.text
     assert "Related work paragraph." not in method_b.text
     assert "Methodology paragraph." in method_b.text
+
+
+def test_structured_document_to_paper_standard(synthetic_pages: list[ParsedPage]):
+    """Verify that to_paper extracts title, authors, abstract, and sections from standard pages."""
+    doc = extract_document_structure(synthetic_pages)
+    paper = doc.to_paper()
+
+    assert isinstance(paper, Paper)
+    assert paper.paper_id == "paper_123"
+    assert paper.title == "Paper Title"
+    assert paper.authors == ["Author One", "Author Two"]
+    assert paper.abstract == "This paper explores multimodal video models."
+    assert len(paper.sections) == 5
+
+    # Test convenience wrapper
+    paper_direct = extract_paper(synthetic_pages)
+    assert paper_direct == paper
+
+
+def test_structured_document_to_paper_no_abstract_section():
+    """Verify that when no Abstract section exists, to_paper falls back to the first section text."""
+    pages = [
+        ParsedPage(
+            page_number=1,
+            text=(
+                "Paper Without Abstract Section\n"
+                "Author One, Author Two\n"
+                "1. Introduction\n"
+                "This paper starts directly with an introduction paragraph."
+            ),
+            source_path="mock/direct_intro_2023.pdf",
+            paper_id="direct_001",
+        )
+    ]
+    paper = extract_paper(pages)
+
+    assert paper.title == "Paper Without Abstract Section"
+    assert "This paper starts directly with an introduction paragraph." in paper.abstract
+    assert paper.authors == ["Author One", "Author Two"]
+    assert paper.year == 2023
+
+
+def test_structured_document_to_paper_fallback():
+    """Verify graceful fallback for title and abstract when no headings exist."""
+    pages = [
+        ParsedPage(
+            page_number=1,
+            text="Some arbitrary unformatted plain text without any academic section markers.",
+            source_path="mock/paper_with_underscores_2021.pdf",
+            paper_id="raw_doc",
+        )
+    ]
+    paper = extract_paper(pages)
+
+    assert paper.paper_id == "raw_doc"
+    assert paper.title == "Some arbitrary unformatted plain text without any academic section markers."
+    assert paper.abstract == "Some arbitrary unformatted plain text without any academic section markers."
+    assert paper.year == 2021
+
+
+def test_abstract_pattern_across_formats():
+    """Verify that ABSTRACT_PATTERN recognizes standard, spaced, and inline abstract headings."""
+    from app.ingestion.structure import ABSTRACT_PATTERN
+
+    assert ABSTRACT_PATTERN.match("Abstract")
+    assert ABSTRACT_PATTERN.match("ABSTRACT")
+    assert ABSTRACT_PATTERN.match("A B S T R A C T")
+    assert ABSTRACT_PATTERN.match("Abstract:")
+    assert ABSTRACT_PATTERN.match("Abstract—In this paper we present...")
+    assert not ABSTRACT_PATTERN.match("1. Introduction")
+    assert not ABSTRACT_PATTERN.match("Overview of Abstract Algebra")
+
+
+def test_structured_document_to_paper_spaced_heading():
+    """Verify to_paper extracts abstract when heading is space-separated (A B S T R A C T)."""
+    pages = [
+        ParsedPage(
+            page_number=1,
+            text=(
+                "UniRTL: A Universal Benchmark for Tracking\n"
+                "Lian Zhang, Lingxue Wang\n"
+                "A B S T R A C T\n"
+                "Solving tracking problems under low illumination.\n"
+                "1. Introduction\n"
+                "We introduce the dataset."
+            ),
+            source_path="mock/unirtl.pdf",
+            paper_id="unirtl_001",
+        )
+    ]
+    paper = extract_paper(pages)
+
+    assert paper.title == "UniRTL: A Universal Benchmark for Tracking"
+    assert paper.abstract == "Solving tracking problems under low illumination."

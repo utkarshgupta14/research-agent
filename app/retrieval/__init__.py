@@ -6,10 +6,13 @@ from app.retrieval.embeddings import (
     OpenAIEmbeddingProvider,
     get_embedding_provider,
 )
+from app.retrieval.faiss_retriever import FAISSRetriever
 
 __all__ = [
     "Retriever",
+    "FAISSRetriever",
     "EmbeddingProvider",
     "OpenAIEmbeddingProvider",
     "get_embedding_provider",
 ]
+
