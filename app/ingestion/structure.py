@@ -47,21 +47,62 @@ STANDARD_HEADINGS: set[str] = {
 
 # Regex pattern for numbered headings:
 # Matches: "1. Introduction", "1 Introduction", "1.1 Model", "II. Related Work", "A. Proof"
-# Constrains section numbers to 1-2 digits (excluding 4-digit years or counts like 400)
+# Constrains section numbers to 1-2 digits or standard low Roman numerals (I to XVI)
 # and ensures title starts with a capital letter.
 NUMBERED_HEADING_PATTERN = re.compile(
-    r"^(?:(?:[1-9][0-9]?(?:\.[0-9]{1,2})*|[IVXLCDM]{1,4})\.?|[A-Z]\.)\s+([A-Z][A-Za-z0-9\s\-:,]{2,60})$"
+    r"^(?:(?:[1-9][0-9]?(?:\.[0-9]{1,2})*|(?:I|II|III|IV|V|VI|VII|VIII|IX|X|XI|XII|XIII|XIV|XV|XVI))\.?|[A-Z]\.)\s+([A-Z][A-Za-z0-9\s\-:,]{2,60})$"
 )
 
 # Regex pattern matching 'Abstract' across formats: standard, all-caps, space-separated letters
 # (e.g. 'A B S T R A C T'), and with trailing punctuation/dashes (e.g. 'Abstract—...', 'Abstract:').
 ABSTRACT_PATTERN = re.compile(
-    r"^\s*a\s*b\s*s\s*t\s*r\s*a\s*c\s*t(?:\b|[—\-:])",
+    r"^\s*a\s*b\s*s\s*t\s*r\s*a\s*c\s*t(?:\b|[—\-:\.])",
     re.IGNORECASE,
 )
 
+AFFILIATION_KEYWORDS: set[str] = {
+    "university", "department", "lab", "laboratory", "institute", "center",
+    "school", "college", "hospital", "china", "usa", "germany", "uk",
+    "singapore", "france", "canada", "corporation", "google", "meta", "facebook",
+    "deepmind", "fair", "informatics", "research", "keywords", "@", "http"
+}
 
-def _is_candidate_heading(line: str) -> bool:
+JOURNAL_BANNERS: set[str] = {
+    "pattern recognition", "computer vision and image understanding",
+    "ieee transactions", "neurocomputing", "neural networks", "information fusion",
+    "proceedings of the", "sciencedirect", "journal homepage", "contents lists available",
+    "elsevier", "arxiv.org", "doi.org"
+}
+
+TITLE_KEYWORDS: set[str] = {
+    "learning", "learners", "networks", "network", "framework", "dataset",
+    "understanding", "interpreting", "recognition", "detection", "tracking",
+    "video", "videos", "benchmark", "transformers", "transformer",
+    "spatiotemporal", "generative", "multimodal", "low-light", "robust",
+    "illumination", "adaptation", "models", "model", "pre-training", "self-supervised"
+}
+
+
+def is_name_line(line: str) -> bool:
+    """Check if a line looks like an author name or list of names rather than a title continuation."""
+    cleaned = re.sub(r"[†*∗‡§\d,]", "", line).strip()
+    words = cleaned.split()
+    if not words:
+        return False
+    if any(w.lower().strip(":-–—") in TITLE_KEYWORDS for w in words):
+        return False
+    if 1 <= len(words) <= 4:
+        if all(w[0].isupper() and w[1:].islower() for w in words if len(w) > 1 and w.isalpha()):
+            return True
+    return False
+
+
+def _is_candidate_heading(
+    line: str,
+    page_num: int = 1,
+    has_numbered_sections: bool = False,
+    has_seen_experiments: bool = False,
+) -> bool:
     """Determine whether a single text line looks like an obvious section heading."""
     cleaned = line.strip()
     if not cleaned or len(cleaned) > 70:
@@ -75,9 +116,18 @@ def _is_candidate_heading(line: str) -> bool:
     if not (cleaned[0].isupper() or cleaned[0].isdigit()):
         return False
 
-    # Check against standard unnumbered section titles
     lower_cleaned = cleaned.lower()
+
+    # Reject lines containing affiliation keywords
+    if any(kw in lower_cleaned for kw in AFFILIATION_KEYWORDS):
+        return False
+
+    # Check against standard unnumbered section titles
     if lower_cleaned in STANDARD_HEADINGS:
+        # Table column headers like "Method", "Model", "Methods", "Experiment"
+        if lower_cleaned in {"method", "methods", "model", "experiment"}:
+            if has_numbered_sections or has_seen_experiments or page_num > 2:
+                return False
         # Avoid generic short words unless title-cased/uppercase
         if len(cleaned.split()) == 1 and not (cleaned.istitle() or cleaned.isupper()):
             return False
@@ -188,7 +238,7 @@ class StructuredDocument(BaseModel):
             lines = [l.strip() for l in abs_block.text.splitlines() if l.strip()]
             for idx, l in enumerate(lines):
                 if ABSTRACT_PATTERN.match(l):
-                    cleaned_inline = ABSTRACT_PATTERN.sub("", l).strip()
+                    cleaned_inline = ABSTRACT_PATTERN.sub("", l).strip().lstrip(".:— -").strip()
                     if cleaned_inline:
                         body = [cleaned_inline] + lines[idx + 1:]
                     else:
@@ -210,6 +260,8 @@ class StructuredDocument(BaseModel):
             if not stripped:
                 continue
             lower = stripped.lower()
+            if any(k in lower for k in JOURNAL_BANNERS):
+                continue
             if any(k in lower for k in [
                 "sciencedirect", "journal homepage", "contents lists available",
                 "arxiv.org", "doi.org", "http://", "https://", "elsevier",
@@ -222,12 +274,18 @@ class StructuredDocument(BaseModel):
 
         if candidates:
             title = candidates[0]
-            if len(candidates) > 1 and len(title) < 60 and not title.endswith((".", ":")):
+            if len(candidates) > 1 and len(title) < 100:
                 next_line = candidates[1]
-                if not any(ch in next_line for ch in [",", "@", "†", "*"]) and not any(
-                    w in next_line.lower() for w in ["university", "department", "lab", "institute", "center", "school"]
-                ):
-                    title = f"{title} {next_line}"
+                next_lower = next_line.lower()
+                # Do NOT append if next_line is an author name or affiliation
+                if not is_name_line(next_line) and not any(kw in next_lower for kw in AFFILIATION_KEYWORDS):
+                    starts_lowercase = next_line[0].islower()
+                    ends_connector = title.endswith((":", "-", "–", "—")) or title.split()[-1].lower() in {
+                        "for", "with", "and", "of", "in", "to", "a", "an", "on", "data-efficient"
+                    }
+                    has_title_kw = any(kw in next_lower for kw in TITLE_KEYWORDS)
+                    if starts_lowercase or ends_connector or has_title_kw:
+                        title = f"{title} {next_line}"
             return title
 
         if self.source_path:
@@ -245,18 +303,26 @@ class StructuredDocument(BaseModel):
     def _extract_authors(self) -> list[str]:
         """Extract candidate author names from preamble lines."""
         preamble = self._get_preamble_lines()
-        authors: list[str] = []
-        for line in preamble[1:]:
+        clean_preamble: list[str] = []
+        for line in preamble:
             stripped = line.strip()
             lower = stripped.lower()
-            if any(k in lower for k in [
-                "@", "http", "university", "department", "lab", "institute",
-                "center", "school", "college", "corporation", "fair", "google",
-                "deepmind", "research", "keywords", "china", "usa"
-            ]):
+            if not stripped or stripped.isdigit():
                 continue
-            if "," in stripped or " and " in stripped:
-                cleaned_line = re.sub(r"[†*∗‡§\d]", "", stripped)
+            if any(b in lower for b in JOURNAL_BANNERS):
+                continue
+            clean_preamble.append(stripped)
+
+        extracted_title = self._extract_title()
+        authors: list[str] = []
+        for line in clean_preamble:
+            if line in extracted_title or extracted_title in line:
+                continue
+            lower = line.lower()
+            if any(k in lower for k in AFFILIATION_KEYWORDS):
+                continue
+            if "," in line or " and " in line:
+                cleaned_line = re.sub(r"[†*∗‡§\d]", "", line)
                 cleaned_line = re.sub(r"\s+[a-f](?:,[a-f])*(?=[,\s]|$)", "", cleaned_line)
                 parts = re.split(r"[,;]|\band\b", cleaned_line)
                 for part in parts:
@@ -264,6 +330,11 @@ class StructuredDocument(BaseModel):
                     if name and 1 < len(name.split()) <= 4 and name[0].isupper():
                         authors.append(name)
                 if authors:
+                    break
+            elif 1 <= len(line.split()) <= 4 and line[0].isupper():
+                cleaned_line = re.sub(r"[†*∗‡§\d]", "", line).strip()
+                if all(w[0].isupper() and w[1:].islower() for w in cleaned_line.split() if len(w) > 1 and w.isalpha()):
+                    authors.append(cleaned_line)
                     break
         return authors
 
@@ -333,11 +404,19 @@ class DocumentStructureExtractor:
             )
 
         # Step 2: Identify heading line positions in the sequential line stream
+        has_numbered = any(
+            bool(NUMBERED_HEADING_PATTERN.match(line)) and not any(kw in line.lower() for kw in AFFILIATION_KEYWORDS)
+            for _, _, line in all_lines
+        )
+        has_seen_experiments = False
+
         # Each entry: (all_lines_index, page_number, line_on_page, heading_title)
         heading_indices: list[tuple[int, int, int, str]] = []
         for idx, (p_num, line_on_page, line) in enumerate(all_lines):
-            if _is_candidate_heading(line):
+            if _is_candidate_heading(line, p_num, has_numbered, has_seen_experiments):
                 title = _clean_heading_title(line)
+                if "experiment" in title.lower():
+                    has_seen_experiments = True
                 # Avoid consecutive duplicate heading lines
                 if not heading_indices or heading_indices[-1][3] != title:
                     heading_indices.append((idx, p_num, line_on_page, title))

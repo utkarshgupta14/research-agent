@@ -11,6 +11,7 @@ Tests:
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from pathlib import Path
 import pytest
 import fitz  # PyMuPDF

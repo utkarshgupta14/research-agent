@@ -34,6 +34,21 @@ class ParsedPage(BaseModel):
         return not bool(self.text.strip())
 
 
+import unicodedata
+import re
+
+
+def _clean_page_text(raw_text: str) -> str:
+    """Normalize unicode ligatures and repair hyphenated line wraps from PDF extraction."""
+    if not raw_text:
+        return ""
+    # Normalize unicode ligatures (e.g. 'fi' -> 'fi', 'fl' -> 'fl')
+    text = unicodedata.normalize("NFKD", raw_text)
+    # Repair hyphenated line wraps: word ending with hyphen, newline, optional whitespace, lowercase continuation
+    text = re.sub(r"(\b[a-zA-Z]{2,})-\n\s*([a-z]{2,}\b)", r"\1\2", text)
+    return text.strip()
+
+
 class PDFParser:
     """Deterministic PDF text parser using PyMuPDF."""
 
@@ -64,7 +79,7 @@ class PDFParser:
         with pymupdf.open(str(path_obj)) as doc:
             for page_idx, page in enumerate(doc):
                 raw_text = page.get_text("text") or ""
-                cleaned_text = raw_text.strip() if isinstance(raw_text, str) else str(raw_text).strip()
+                cleaned_text = _clean_page_text(raw_text)
                 pages.append(
                     ParsedPage(
                         page_number=page_idx + 1,
