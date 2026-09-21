@@ -97,6 +97,9 @@ class FakeRetriever(Retriever):
             )
         return results
 
+    def get_paper(self, paper_id: str) -> Paper | None:
+        return self._papers.get(paper_id)
+
 
 # ==============================================================================
 # Unit Tests
@@ -237,3 +240,19 @@ def test_fake_retriever_empty_handling():
     # k <= 0
     assert retriever.search_papers("title", k=0) == []
     assert retriever.retrieve_evidence("text", k=0) == []
+
+
+def test_fake_retriever_get_paper():
+    """Verify get_paper returns the paper model or None if missing."""
+    retriever = FakeRetriever()
+    paper = Paper(
+        paper_id="paper_001",
+        title="Attention Is All You Need",
+        authors=["Vaswani et al."],
+        year=2017,
+        abstract="The dominant sequence transduction models...",
+    )
+    retriever.index_papers([paper])
+
+    assert retriever.get_paper("paper_001") == paper
+    assert retriever.get_paper("non_existent") is None

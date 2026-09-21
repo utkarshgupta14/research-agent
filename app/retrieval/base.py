@@ -66,3 +66,15 @@ class Retriever(ABC):
             List of Evidence models ranked by relevance score in descending order.
         """
         ...
+
+    @abstractmethod
+    def get_paper(self, paper_id: str) -> Paper | None:
+        """Retrieve paper metadata and structural sections by paper ID.
+
+        Args:
+            paper_id: Unique paper identifier.
+
+        Returns:
+            The Paper domain model if found, else None.
+        """
+        ...

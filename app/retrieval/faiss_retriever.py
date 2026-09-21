@@ -205,6 +205,20 @@ class FAISSRetriever(Retriever):
 
         return results
 
+    def get_paper(self, paper_id: str) -> Paper | None:
+        """Retrieve paper metadata and structural sections by paper ID.
+
+        Args:
+            paper_id: Unique paper identifier.
+
+        Returns:
+            The Paper model if found, else None.
+        """
+        for paper in self._papers:
+            if paper.paper_id == paper_id:
+                return paper
+        return None
+
     # ==========================================================================
     # Persistence (Save & Load)
     # ==========================================================================
